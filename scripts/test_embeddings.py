@@ -94,25 +94,45 @@ def test_embedding_pipeline():
         print(f"     Text: {document}")
         print()
     
-    # Test 5: Vector similarity search
-    print("🔧 Test 5: Vector-based Search")
-    query_vector = embedding_client.encode("健身相关的内容")
-    ids, distances, metadatas = vector_store.search(
-        query_vector=query_vector,
-        top_k=2
-    )
+    # Test 5: Vector-based Search (Improved)
+    print("🔧 Test 5: Vector-based Search (Improved)")
     
-    print("Query: 健身相关的内容")
-    print("Top 2 similar documents:")
-    for i, (doc_id, distance, metadata) in enumerate(zip(ids, distances, metadatas)):
-        doc_data = vector_store.get_by_id(doc_id)
-        document = doc_data['document'] if doc_data else "Not found"
-        print(f"  {i+1}. ID: {doc_id}, Distance: {distance:.4f}")
-        print(f"     Text: {document}")
-        print()
+    # Test multiple fitness-related queries
+    fitness_queries = [
+        "阿B健身锻炼运动",
+        "健身房设备", 
+        "workout exercise gym"
+    ]
     
-    # Test 6: Text similarity calculation
-    print("🔧 Test 6: Text Similarity")
+    for query_text in fitness_queries:
+        print(f"\nQuery: {query_text}")
+        query_vector = embedding_client.encode(query_text)
+        ids, distances, metadatas = vector_store.search(
+            query_vector=query_vector,
+            top_k=3
+        )
+        
+        print("Top 3 similar documents:")
+        for i, (doc_id, distance, metadata) in enumerate(zip(ids, distances, metadatas)):
+            doc_data = vector_store.get_by_id(doc_id)
+            document = doc_data['document'] if doc_data else "Not found"
+            # Highlight if it contains fitness keywords
+            is_fitness = any(keyword in document for keyword in ['健身', '锻炼', '运动', '健身房', 'gym', 'workout'])
+            status = "✅" if is_fitness else "❌"
+            print(f"  {i+1}. {status} ID: {doc_id}, Distance: {distance:.4f}")
+            print(f"     Text: {document}")
+    
+    # Debug: Check similarities between queries and all docs
+    print("\n🔍 Debug: Similarity Matrix")
+    for i, doc in enumerate(test_documents):
+        for query in fitness_queries[:1]:  # Only first query for brevity
+            sim = embedding_client.similarity(query, doc)
+            is_fitness = any(keyword in doc for keyword in ['健身', '锻炼', '运动', '健身房'])
+            status = "🎯" if is_fitness else "📄"
+            print(f"  {status} Query vs Doc{i}: {sim:.4f} - {doc[:30]}...")
+    
+    # Test 6: Text Similarity (Enhanced)
+    print("\n🔧 Test 6: Text Similarity (Enhanced)")
     text1 = "猫心情很好"
     text2 = "猫今天很开心"
     text3 = "阿B在健身"
