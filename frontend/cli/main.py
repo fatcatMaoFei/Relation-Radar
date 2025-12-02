@@ -2,18 +2,16 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
-from typing import List, Optional
 
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.core.models import Event, Person
-from backend.core.repositories import EventRepository, PersonRepository
+from backend.core.models import Event, Person  # noqa: E402
+from backend.core.repositories import EventRepository, PersonRepository  # noqa: E402
 
 
 def add_person(args) -> None:
