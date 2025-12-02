@@ -1,1 +1,364 @@
+"""
+Data ingestion module for Relation Radar.
 
+This module handles converting raw text input into structured Event records,
+storing them in the database, and indexing them in the vector store.
+"""
+from __future__ import annotations
+
+import re
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional
+
+# Ensure project root is on sys.path
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from backend.core.models import Event  # noqa: E402
+from backend.core.repositories import EventRepository  # noqa: E402
+from backend.rag.retriever import get_retriever  # noqa: E402
+
+
+@dataclass
+class EventDraft:
+    """
+    Draft event extracted from raw text.
+    
+    This is used as an intermediate representation between
+    raw text and the final Event model. Future AI extraction
+    will produce a list of these drafts from a single text input.
+    """
+    
+    summary: str
+    raw_text: str
+    occurred_at: Optional[str] = None
+    raw_time_text: Optional[str] = None
+    event_type: Optional[str] = None
+    emotion: Optional[str] = None
+    preferences: List[str] = field(default_factory=list)
+    taboos: List[str] = field(default_factory=list)
+    tags: List[str] = field(default_factory=list)
+    
+    def to_event(self, person_ids: List[int]) -> Event:
+        """Convert draft to Event model."""
+        return Event(
+            person_ids=person_ids,
+            occurred_at=self.occurred_at,
+            raw_time_text=self.raw_time_text,
+            event_type=self.event_type,
+            summary=self.summary,
+            raw_text=self.raw_text,
+            emotion=self.emotion,
+            preferences=self.preferences,
+            taboos=self.taboos,
+            tags=self.tags,
+        )
+
+
+class TextExtractor:
+    """
+    Simple rule-based text extractor for event information.
+    
+    This is a placeholder implementation that will be replaced
+    with AI-powered extraction (e.g., Qwen) in future versions.
+    """
+    
+    # Time patterns
+    TIME_PATTERNS = {
+        r'今天': 'today',
+        r'昨天': 'yesterday',
+        r'前天': 'day_before_yesterday',
+        r'上周': 'last_week',
+        r'上个月': 'last_month',
+        r'刚才': 'just_now',
+        r'今晚': 'tonight',
+        r'今早': 'this_morning',
+        r'中午': 'noon',
+        r'晚上': 'evening',
+    }
+    
+    # Emotion patterns
+    EMOTION_PATTERNS = {
+        '开心': ['开心', '高兴', '愉快', '快乐', '兴奋', '满足', '幸福'],
+        '悲伤': ['伤心', '难过', '悲伤', '哭', '失落'],
+        '焦虑': ['焦虑', '担心', '紧张', '压力', '烦恼', '忧虑'],
+        '生气': ['生气', '愤怒', '烦躁', '不满', '抱怨'],
+        '平静': ['平静', '淡定', '轻松', '放松'],
+    }
+    
+    # Event type patterns
+    EVENT_TYPE_PATTERNS = {
+        '聚餐': ['吃饭', '聚餐', '饭局', '吃火锅', '吃烧烤', '吃日料', '吃川菜', '喝酒', '餐厅'],
+        '健身': ['健身', '运动', '锻炼', '跑步', '游泳', '健身房', '瑜伽'],
+        '聊天': ['聊天', '聊', '说', '谈', '沟通', '交流', '讨论'],
+        '约会': ['约会', '看电影', '逛街', '购物'],
+        '工作': ['工作', '加班', '开会', '出差', '项目'],
+        '生日': ['生日', '庆祝', '蛋糕'],
+        '旅行': ['旅行', '旅游', '出游', '玩'],
+    }
+    
+    # Preference patterns
+    PREFERENCE_KEYWORDS = ['喜欢', '爱', '偏好', '喜爱', '钟爱', '热爱', '最爱']
+    
+    # Taboo patterns
+    TABOO_KEYWORDS = ['不喜欢', '讨厌', '忌讳', '反感', '害怕', '不爱', '不吃', '不想']
+    
+    def extract(self, text: str) -> EventDraft:
+        """
+        Extract event information from raw text.
+        
+        Args:
+            text: Raw text input
+            
+        Returns:
+            EventDraft with extracted information
+        """
+        # Extract time
+        raw_time_text, occurred_at = self._extract_time(text)
+        
+        # Extract emotion
+        emotion = self._extract_emotion(text)
+        
+        # Extract event type
+        event_type = self._extract_event_type(text)
+        
+        # Extract preferences and taboos
+        preferences = self._extract_preferences(text)
+        taboos = self._extract_taboos(text)
+        
+        # Generate tags
+        tags = self._generate_tags(text, event_type, emotion)
+        
+        # Create summary (use full text for now, AI will generate better summaries)
+        summary = text.strip()
+        if len(summary) > 200:
+            summary = summary[:200] + "..."
+        
+        return EventDraft(
+            summary=summary,
+            raw_text=text,
+            occurred_at=occurred_at,
+            raw_time_text=raw_time_text,
+            event_type=event_type,
+            emotion=emotion,
+            preferences=preferences,
+            taboos=taboos,
+            tags=tags,
+        )
+    
+    def _extract_time(self, text: str) -> tuple[Optional[str], Optional[str]]:
+        """Extract time information from text."""
+        raw_time_text = None
+        occurred_at = None
+        
+        for pattern, time_type in self.TIME_PATTERNS.items():
+            if re.search(pattern, text):
+                raw_time_text = pattern
+                # Convert to ISO format based on current date
+                occurred_at = self._time_to_iso(time_type)
+                break
+        
+        return raw_time_text, occurred_at
+    
+    def _time_to_iso(self, time_type: str) -> str:
+        """Convert time type to ISO format string."""
+        now = datetime.now()
+        
+        if time_type == 'today':
+            return now.strftime("%Y-%m-%dT%H:%M:%S")
+        elif time_type == 'yesterday':
+            from datetime import timedelta
+            yesterday = now - timedelta(days=1)
+            return yesterday.strftime("%Y-%m-%dT%H:%M:%S")
+        elif time_type == 'day_before_yesterday':
+            from datetime import timedelta
+            day = now - timedelta(days=2)
+            return day.strftime("%Y-%m-%dT%H:%M:%S")
+        elif time_type == 'last_week':
+            from datetime import timedelta
+            day = now - timedelta(weeks=1)
+            return day.strftime("%Y-%m-%dT%H:%M:%S")
+        elif time_type == 'last_month':
+            from datetime import timedelta
+            day = now - timedelta(days=30)
+            return day.strftime("%Y-%m-%dT%H:%M:%S")
+        else:
+            return now.strftime("%Y-%m-%dT%H:%M:%S")
+    
+    def _extract_emotion(self, text: str) -> Optional[str]:
+        """Extract emotion from text."""
+        for emotion, keywords in self.EMOTION_PATTERNS.items():
+            for keyword in keywords:
+                if keyword in text:
+                    return emotion
+        return None
+    
+    def _extract_event_type(self, text: str) -> Optional[str]:
+        """Extract event type from text."""
+        for event_type, keywords in self.EVENT_TYPE_PATTERNS.items():
+            for keyword in keywords:
+                if keyword in text:
+                    return event_type
+        return None
+    
+    def _extract_preferences(self, text: str) -> List[str]:
+        """Extract preferences from text."""
+        preferences = []
+        
+        for keyword in self.PREFERENCE_KEYWORDS:
+            # Find what comes after the keyword
+            pattern = f'{keyword}(.{{1,20}}?)(?:[，。！？,.]|$)'
+            matches = re.findall(pattern, text)
+            for match in matches:
+                pref = match.strip()
+                if pref and len(pref) > 1:
+                    preferences.append(f"{keyword}{pref}")
+        
+        return preferences
+    
+    def _extract_taboos(self, text: str) -> List[str]:
+        """Extract taboos from text."""
+        taboos = []
+        
+        for keyword in self.TABOO_KEYWORDS:
+            pattern = f'{keyword}(.{{1,20}}?)(?:[，。！？,.]|$)'
+            matches = re.findall(pattern, text)
+            for match in matches:
+                taboo = match.strip()
+                if taboo and len(taboo) > 1:
+                    taboos.append(f"{keyword}{taboo}")
+        
+        return taboos
+    
+    def _generate_tags(
+        self,
+        text: str,
+        event_type: Optional[str],
+        emotion: Optional[str]
+    ) -> List[str]:
+        """Generate tags for the event."""
+        tags = []
+        
+        if event_type:
+            tags.append(event_type)
+        
+        if emotion:
+            tags.append(emotion)
+        
+        # Add common keywords as tags
+        common_tags = ['工作', '生活', '朋友', '家人', '健康']
+        for tag in common_tags:
+            if tag in text and tag not in tags:
+                tags.append(tag)
+        
+        return tags
+
+
+def extract_events(text: str) -> List[EventDraft]:
+    """
+    Extract events from raw text.
+    
+    This is a placeholder function that currently extracts a single event
+    from the input text. In the future, this will use AI (Qwen) to:
+    - Identify multiple events in a single text
+    - Extract more accurate time/emotion/preference information
+    - Generate better summaries
+    
+    Args:
+        text: Raw text input
+        
+    Returns:
+        List of EventDraft objects extracted from the text
+    """
+    extractor = TextExtractor()
+    draft = extractor.extract(text)
+    return [draft]
+
+
+def ingest_manual(
+    person_ids: List[int],
+    raw_text: str,
+    auto_index: bool = True
+) -> Event:
+    """
+    Ingest manually entered text and create an Event.
+    
+    This function:
+    1. Extracts event information from raw text (using rules, future: AI)
+    2. Creates an Event record in the database
+    3. Indexes the event in the vector store for RAG retrieval
+    
+    Args:
+        person_ids: List of person IDs this event is associated with
+        raw_text: Raw text describing the event
+        auto_index: Whether to automatically index in vector store
+        
+    Returns:
+        The created Event object
+        
+    Raises:
+        ValueError: If person_ids is empty or raw_text is blank
+    """
+    # Validate input
+    if not person_ids:
+        raise ValueError("At least one person_id is required")
+    
+    if not raw_text or not raw_text.strip():
+        raise ValueError("raw_text cannot be empty")
+    
+    # Extract event information
+    drafts = extract_events(raw_text)
+    
+    if not drafts:
+        raise ValueError("Could not extract any events from the text")
+    
+    # Use the first draft (future: handle multiple events)
+    draft = drafts[0]
+    
+    # Convert to Event
+    event = draft.to_event(person_ids)
+    
+    # Save to database
+    event_repo = EventRepository()
+    created_event = event_repo.create(event)
+    
+    # Index in vector store
+    if auto_index and created_event.id:
+        retriever = get_retriever()
+        embedding_id = retriever.index_event(created_event)
+        
+        # Update event with embedding_id
+        created_event.embedding_id = embedding_id
+    
+    return created_event
+
+
+def ingest_batch(
+    person_ids: List[int],
+    texts: List[str],
+    auto_index: bool = True
+) -> List[Event]:
+    """
+    Ingest multiple texts at once.
+    
+    Args:
+        person_ids: List of person IDs for all events
+        texts: List of raw text inputs
+        auto_index: Whether to automatically index in vector store
+        
+    Returns:
+        List of created Event objects
+    """
+    events = []
+    for text in texts:
+        try:
+            event = ingest_manual(person_ids, text, auto_index)
+            events.append(event)
+        except ValueError as e:
+            print(f"Warning: Skipping text due to error: {e}")
+    
+    return events
