@@ -8,9 +8,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.core.db import init_db
-from backend.core.models import Event, Person, Relationship
-from backend.core.repositories import (
+from backend.core.db import init_db  # noqa: E402
+from backend.core.models import Event, Person, Relationship  # noqa: E402
+from backend.core.repositories import (  # noqa: E402
     EventRepository,
     PersonRepository,
     RelationshipRepository,
@@ -33,7 +33,7 @@ def main() -> None:
     )
 
     # Sample events
-    dinner_event = event_repo.create(
+    event_repo.create(
         Event(
             person_ids=[alice.id or 0, bob.id or 0],
             occurred_at="2025-01-01T19:00:00",
@@ -47,7 +47,7 @@ def main() -> None:
     )
 
     # Sample relationship
-    relationship = relationship_repo.create(
+    relationship_repo.create(
         Relationship(
             person_a_id=alice.id or 0,
             person_b_id=bob.id or 0,
