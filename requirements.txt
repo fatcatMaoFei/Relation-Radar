@@ -1,1 +1,14 @@
+## Core runtime
+pydantic>=2.7
 
+## RAG / LLM orchestration (to be used from v0.1+)
+langchain-core>=0.3.0
+langchain-community>=0.3.0
+
+## Vector store & embeddings
+chromadb>=0.5.0
+sentence-transformers>=2.7.0
+
+## API / web (used from v0.2+)
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
