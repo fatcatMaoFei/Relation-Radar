@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.llm.local_client import Message, get_llm_client  # noqa: E402
+from backend.llm.prompts import build_qa_rag_prompt  # noqa: E402
 from backend.rag.retriever import RetrievedDocument, get_retriever  # noqa: E402
 
 
@@ -183,16 +184,7 @@ class QAChain:
         """
         Build the prompt for the LLM.
         """
-        prompt = f"""你是一个帮助用户管理人际关系的助手。根据以下记录回答问题。
-
-相关记录：
-{context}
-
-问题：{question}
-
-请根据上述记录，给出详细、有帮助的回答。如果记录中没有相关信息，请如实说明。"""
-        
-        return prompt
+        return build_qa_rag_prompt(question=question, context=context)
     
     def _build_chat_messages(
         self,
