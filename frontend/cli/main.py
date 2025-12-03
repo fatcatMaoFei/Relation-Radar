@@ -327,13 +327,6 @@ def main() -> None:
     )
     ask_parser.set_defaults(func=ask)
     
-    # ask command (RAG Q&A)
-    ask_parser = subparsers.add_parser("ask", help="Ask a question about a person using RAG")
-    ask_parser.add_argument("question", help="The question to ask")
-    ask_parser.add_argument("--person-id", type=int, help="Filter by person ID")
-    ask_parser.add_argument("--top-k", type=int, default=5, help="Number of context documents to retrieve")
-    ask_parser.add_argument("-v", "--verbose", action="store_true", help="Show retrieved contexts")
-    ask_parser.set_defaults(func=ask_question)
     
     # ingest command (text ingestion)
     ingest_parser = subparsers.add_parser("ingest", help="Ingest raw text and create an event")
