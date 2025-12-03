@@ -10,9 +10,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from backend.core.ingest import ingest_manual  # noqa: E402
 from backend.core.models import Event, Person  # noqa: E402
 from backend.core.repositories import EventRepository, PersonRepository  # noqa: E402
-from backend.rag.chains import ask_question  # noqa: E402
+from backend.rag.chains import get_qa_chain  # noqa: E402
 
 
 def add_person(args) -> None:
@@ -111,6 +112,99 @@ def list_events(args) -> None:
         print("-" * 40)
 
 
+def ask_question(args) -> None:
+    """Ask a question about a person using RAG."""
+    qa_chain = get_qa_chain()
+    
+    # Get person name if person_id is provided
+    person_name = None
+    if args.person_id:
+        repo = PersonRepository()
+        person = repo.get(args.person_id)
+        if person:
+            person_name = person.name
+        else:
+            print(f"Warning: Person with ID {args.person_id} not found")
+    
+    # Ask the question
+    result = qa_chain.ask(
+        question=args.question,
+        person_id=args.person_id,
+        top_k=args.top_k or 5
+    )
+    
+    # Display results
+    print("\n" + "=" * 60)
+    print(f"🔍 问题: {result.question}")
+    if args.person_id:
+        print(f"👤 查询对象: {person_name or 'Unknown'} (ID: {args.person_id})")
+    print("=" * 60)
+    
+    # Show retrieved contexts if verbose
+    if args.verbose:
+        print("\n📄 检索到的相关记录:")
+        print("-" * 40)
+        
+        if result.retrieved_contexts:
+            for i, doc in enumerate(result.retrieved_contexts, 1):
+                print(f"\n[{i}] 相关度: {doc.score:.2%}")
+                print(doc.to_context_string())
+        else:
+            print("未找到相关记录")
+        
+        print("\n" + "-" * 40)
+    
+    # Show answer
+    print("\n🤖 回答:")
+    print(result.answer)
+    print("=" * 60)
+
+
+def ingest_text(args) -> None:
+    """Ingest raw text and create an event."""
+    person_ids = [int(pid.strip()) for pid in args.person_ids.split(",")]
+    
+    # Verify all person IDs exist
+    repo = PersonRepository()
+    for pid in person_ids:
+        person = repo.get(pid)
+        if person is None:
+            print(f"Error: Person with ID {pid} does not exist")
+            return
+    
+    # Get person names for display
+    person_names = [repo.get(pid).name for pid in person_ids]
+    
+    try:
+        event = ingest_manual(
+            person_ids=person_ids,
+            raw_text=args.text,
+            auto_index=True
+        )
+        
+        print("\n✅ 事件录入成功!")
+        print("=" * 40)
+        print(f"ID: {event.id}")
+        print(f"关联人物: {', '.join(person_names)}")
+        print(f"摘要: {event.summary}")
+        if event.emotion:
+            print(f"情绪: {event.emotion}")
+        if event.event_type:
+            print(f"类型: {event.event_type}")
+        if event.preferences:
+            print(f"偏好: {', '.join(event.preferences)}")
+        if event.taboos:
+            print(f"忌讳: {', '.join(event.taboos)}")
+        if event.tags:
+            print(f"标签: {', '.join(event.tags)}")
+        print(f"向量索引: {event.embedding_id}")
+        print("=" * 40)
+        print("💡 现在可以通过 'ask' 命令查询这条记录了!")
+        
+    except ValueError as e:
+        print(f"Error: {e}")
+
+
 def list_persons(args) -> None:
     """List all persons in the database."""
     repo = PersonRepository()
@@ -202,7 +296,7 @@ def main() -> None:
     events_parser.add_argument("--limit", type=int, help="Maximum number of events to return")
     events_parser.set_defaults(func=list_events)
     
-    # list-persons command (bonus)
+    # list-persons command
     persons_parser = subparsers.add_parser("list-persons", help="List all persons")
     persons_parser.set_defaults(func=list_persons)
 
@@ -232,6 +326,20 @@ def main() -> None:
         help="Show detailed context and formatted answer",
     )
     ask_parser.set_defaults(func=ask)
+    
+    # ask command (RAG Q&A)
+    ask_parser = subparsers.add_parser("ask", help="Ask a question about a person using RAG")
+    ask_parser.add_argument("question", help="The question to ask")
+    ask_parser.add_argument("--person-id", type=int, help="Filter by person ID")
+    ask_parser.add_argument("--top-k", type=int, default=5, help="Number of context documents to retrieve")
+    ask_parser.add_argument("-v", "--verbose", action="store_true", help="Show retrieved contexts")
+    ask_parser.set_defaults(func=ask_question)
+    
+    # ingest command (text ingestion)
+    ingest_parser = subparsers.add_parser("ingest", help="Ingest raw text and create an event")
+    ingest_parser.add_argument("person_ids", help="Comma-separated person IDs")
+    ingest_parser.add_argument("text", help="Raw text to ingest")
+    ingest_parser.set_defaults(func=ingest_text)
     
     args = parser.parse_args()
     
