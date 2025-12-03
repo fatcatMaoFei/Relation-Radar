@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Prompt helpers for Relation Radar.
 
@@ -7,6 +5,8 @@ Prompt helpers for Relation Radar.
 - 所有基础 prompt 文本放在 `config/prompts/*.txt` 中，使用 UTF-8 编码。
 - 这里提供加载和简单格式化的辅助函数，供 RAG QA 链、信息抽取链等使用。
 """
+
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -77,4 +77,3 @@ def build_extract_event_prompt(text: str) -> str:
         "输出 JSON 数组，每个元素包含：人物、时间、事件类型、摘要、情绪、偏好、忌讳、标签。\n\n"
         f"文本：\n{text}"
     )
-
