@@ -260,13 +260,10 @@ class TextExtractor:
 
 def extract_events(text: str) -> List[EventDraft]:
     """
-    Extract events from raw text.
+    Extract events from raw text using AI (Qwen) or fallback to rules.
     
-    This is a placeholder function that currently extracts a single event
-    from the input text. In the future, this will use AI (Qwen) to:
-    - Identify multiple events in a single text
-    - Extract more accurate time/emotion/preference information
-    - Generate better summaries
+    This function uses Qwen LLM to intelligently extract multiple events
+    from a single text input, with structured JSON output.
     
     Args:
         text: Raw text input
@@ -274,9 +271,163 @@ def extract_events(text: str) -> List[EventDraft]:
     Returns:
         List of EventDraft objects extracted from the text
     """
+    # Import here to avoid circular imports
+    from backend.llm.local_client import get_llm_client
+    
+    client = get_llm_client()
+    
+    # Check if using Qwen mode for intelligent extraction
+    if hasattr(client, '_mode') and client._mode == 'qwen':
+        try:
+            return _extract_events_with_qwen(text, client)
+        except Exception as e:
+            print(f"⚠️  Qwen extraction failed: {e}, falling back to rule-based extraction")
+    
+    # Fallback to rule-based extraction
     extractor = TextExtractor()
     draft = extractor.extract(text)
     return [draft]
+
+
+def _extract_events_with_qwen(text: str, client) -> List[EventDraft]:
+    """
+    Use Qwen to extract structured events from text.
+    
+    Args:
+        text: Raw text input
+        client: LLM client instance
+        
+    Returns:
+        List of EventDraft objects
+    """
+    import json
+    from backend.llm.prompts import build_extract_event_prompt
+    
+    # Build extraction prompt
+    prompt = build_extract_event_prompt(text)
+    
+    # Get LLM response
+    response = client.generate(prompt, max_tokens=1024)
+    
+    # Parse JSON response
+    try:
+        events_data = json.loads(response.strip())
+        if not isinstance(events_data, list):
+            raise ValueError("Response is not a JSON array")
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"⚠️  Failed to parse JSON response: {e}")
+        print(f"⚠️  Raw response: {response[:200]}...")
+        # Fallback to rule-based extraction
+        extractor = TextExtractor()
+        return [extractor.extract(text)]
+    
+    # Convert JSON to EventDraft objects
+    drafts = []
+    for event_data in events_data:
+        try:
+            draft = _json_to_event_draft(event_data, text)
+            drafts.append(draft)
+        except Exception as e:
+            print(f"⚠️  Failed to convert event data: {e}, skipping event")
+            continue
+    
+    # If no events extracted, fallback to rule-based
+    if not drafts:
+        print("⚠️  No events extracted by Qwen, using rule-based fallback")
+        extractor = TextExtractor()
+        drafts = [extractor.extract(text)]
+    
+    return drafts
+
+
+def _json_to_event_draft(event_data: dict, original_text: str) -> EventDraft:
+    """
+    Convert JSON event data to EventDraft object.
+    
+    Args:
+        event_data: JSON object with event fields
+        original_text: Original input text
+        
+    Returns:
+        EventDraft object
+    """
+    
+    # Extract fields from JSON (handle None values)
+    summary = event_data.get('summary') or ''
+    time_text = event_data.get('time_text') or ''
+    event_type = event_data.get('event_type') or ''
+    emotion = event_data.get('emotion') or ''
+    preferences = event_data.get('preferences') or []
+    taboos = event_data.get('taboos') or []
+    tags = event_data.get('tags') or []
+    
+    # Strip strings safely
+    summary = summary.strip() if isinstance(summary, str) else str(summary)
+    time_text = time_text.strip() if isinstance(time_text, str) else str(time_text)
+    event_type = event_type.strip() if isinstance(event_type, str) else str(event_type)
+    emotion = emotion.strip() if isinstance(emotion, str) else str(emotion)
+    
+    # Convert time_text to occurred_at (simple mapping)
+    occurred_at = _parse_time_text(time_text) if time_text else None
+    
+    # Ensure lists are actually lists
+    if isinstance(preferences, str):
+        preferences = [preferences] if preferences else []
+    if isinstance(taboos, str):
+        taboos = [taboos] if taboos else []
+    if isinstance(tags, str):
+        tags = [tags] if tags else []
+    
+    # Validate required fields
+    if not summary:
+        summary = original_text[:100] + "..." if len(original_text) > 100 else original_text
+    
+    return EventDraft(
+        summary=summary,
+        raw_text=original_text,
+        occurred_at=occurred_at,
+        raw_time_text=time_text or None,
+        event_type=event_type or None,
+        emotion=emotion or None,
+        preferences=preferences,
+        taboos=taboos,
+        tags=tags,
+    )
+
+
+def _parse_time_text(time_text: str) -> str:
+    """
+    Parse time text to ISO format string.
+    
+    Args:
+        time_text: Natural language time description
+        
+    Returns:
+        ISO format time string or None
+    """
+    from datetime import datetime, timedelta
+    
+    now = datetime.now()
+    
+    # Simple time parsing (can be enhanced)
+    time_mappings = {
+        '今天': now,
+        '昨天': now - timedelta(days=1),
+        '前天': now - timedelta(days=2),
+        '明天': now + timedelta(days=1),
+        '后天': now + timedelta(days=2),
+        '上周': now - timedelta(weeks=1),
+        '下周': now + timedelta(weeks=1),
+        '上个月': now - timedelta(days=30),
+        '下个月': now + timedelta(days=30),
+    }
+    
+    for key, time_obj in time_mappings.items():
+        if key in time_text:
+            return time_obj.strftime("%Y-%m-%dT%H:%M:%S")
+    
+    # If no match, return current time
+    return now.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def ingest_manual(
