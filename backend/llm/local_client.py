@@ -1,11 +1,19 @@
 """
 Local LLM client for Relation Radar.
 
-This module provides a mock LLM client interface that will be replaced
-with a real local model (like Qwen) in future versions.
+This module provides:
+- 一个基于规则的 mock LLM（默认，用于开发 / CI）。
+- 可选的本地 Qwen 客户端（通过 Ollama 调用），用于真实问答体验。
+
+通过环境变量控制模式：
+- RELATION_RADAR_LLM_MODE=mock  → 使用内置规则 mock（默认）。
+- RELATION_RADAR_LLM_MODE=qwen  → 调用本地 Ollama 中的 Qwen 模型。
+  - OLLAMA_BASE_URL（可选，默认为 http://127.0.0.1:11434）
+  - RELATION_RADAR_LLM_MODEL（可选，默认为 qwen2.5:3b）
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import List
@@ -29,22 +37,32 @@ class Message:
 
 class LocalLLMClient:
     """
-    Mock Local LLM client for development and testing.
-    
-    This client provides a simple mock implementation that generates
-    responses based on the provided context. It will be replaced with
-    a real local LLM (like Qwen) in future versions.
+    Local LLM client for development and testing.
+
+    模式：
+    - mock（默认）：使用规则生成的占位回答，适合 CI 和无模型环境。
+    - qwen：通过 Ollama 调用本地 Qwen 模型，用于真实问答。
     """
     
-    def __init__(self, model_name: str = "mock-llm"):
+    def __init__(self, model_name: str | None = None):
         """
         Initialize the local LLM client.
         
         Args:
-            model_name: Name of the model to use (mock for now)
+            model_name: Name of the model to use（仅在 qwen 模式下使用）.
         """
-        self.model_name = model_name
-        self._is_mock = True
+        # 模式：mock / qwen
+        self._mode = os.getenv("RELATION_RADAR_LLM_MODE", "mock").lower()
+        # Qwen 模型名称（Ollama 中的 model 名）
+        self.model_name = (
+            model_name
+            or os.getenv("RELATION_RADAR_LLM_MODEL", "qwen2.5:3b")
+        )
+        # Ollama 服务地址
+        self._ollama_base_url = os.getenv(
+            "OLLAMA_BASE_URL",
+            "http://127.0.0.1:11434",
+        )
     
     def generate(self, prompt: str, max_tokens: int = 512) -> str:
         """
@@ -57,11 +75,9 @@ class LocalLLMClient:
         Returns:
             Generated text response
         """
-        if self._is_mock:
-            return self._mock_generate(prompt)
-        
-        # Future: Real LLM generation
-        raise NotImplementedError("Real LLM not yet implemented")
+        if self._mode == "qwen":
+            return self._qwen_generate(prompt, max_tokens=max_tokens)
+        return self._mock_generate(prompt)
     
     def chat(self, messages: List[Message], max_tokens: int = 512) -> str:
         """
@@ -74,11 +90,9 @@ class LocalLLMClient:
         Returns:
             Assistant's response
         """
-        if self._is_mock:
-            return self._mock_chat(messages)
-        
-        # Future: Real LLM chat
-        raise NotImplementedError("Real LLM not yet implemented")
+        if self._mode == "qwen":
+            return self._qwen_chat(messages, max_tokens=max_tokens)
+        return self._mock_chat(messages)
     
     def _mock_generate(self, prompt: str) -> str:
         """
@@ -200,6 +214,66 @@ class LocalLLMClient:
             return '\n'.join(response_parts)
         else:
             return "根据现有记录：\n" + '\n'.join(f"- {line[:80]}" for line in context_lines[:5])
+
+    # === Real Qwen via Ollama ===
+
+    def _qwen_generate(self, prompt: str, max_tokens: int = 512) -> str:
+        """
+        Call local Qwen (via Ollama) with a single prompt.
+
+        For simplicity, we treat the whole prompt as a single user message.
+        """
+        messages = [Message(role="user", content=prompt)]
+        return self._qwen_chat(messages, max_tokens=max_tokens)
+
+    def _qwen_chat(self, messages: List[Message], max_tokens: int = 512) -> str:
+        """
+        Call local Qwen (via Ollama /api/chat) with chat-style messages.
+        """
+        try:
+            import requests
+        except ImportError as exc:  # pragma: no cover - env issue
+            raise RuntimeError(
+                "requests is required for Qwen mode. "
+                "Please `pip install requests` or switch RELATION_RADAR_LLM_MODE=mock.",
+            ) from exc
+
+        # Convert internal Message objects to Ollama format
+        payload_messages = [
+            {"role": msg.role, "content": msg.content}
+            for msg in messages
+        ]
+
+        url = f"{self._ollama_base_url.rstrip('/')}/api/chat"
+        payload = {
+            "model": self.model_name,
+            "messages": payload_messages,
+            "stream": False,
+            # Ollama 接口中对应的是 num_predict；这里给一个上限，防止输出过长
+            "options": {"num_predict": max_tokens},
+        }
+
+        try:
+            resp = requests.post(url, json=payload, timeout=60)
+        except Exception as exc:  # pragma: no cover - network/runtime issue
+            raise RuntimeError(
+                f"Failed to call Qwen via Ollama at {url}: {exc}",
+            ) from exc
+
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Ollama returned status {resp.status_code}: {resp.text}",
+            )
+
+        data = resp.json()
+        # Ollama /api/chat returns: {"message": {"role": "...", "content": "..."}, ...}
+        message = data.get("message") or {}
+        content = message.get("content")
+        if not content:
+            raise RuntimeError(
+                f"Ollama response missing content: {data}",
+            )
+        return str(content)
 
 
 # Global instance
