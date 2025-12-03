@@ -19,7 +19,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import numpy as np  # noqa: E402
-from sentence_transformers import SentenceTransformer  # noqa: E402
+
+try:  # Optional heavy dependency
+    from sentence_transformers import SentenceTransformer  # type: ignore[assignment]  # noqa: E402
+except Exception:  # pragma: no cover - missing optional dependency
+    SentenceTransformer = None  # type: ignore[assignment]
 
 
 class _HashEmbeddingModel:
@@ -101,29 +105,42 @@ class EmbeddingClient:
             self._model = _HashEmbeddingModel()
             return self._model
 
-        # Try real model (offline first)
-        try:
-            self._model = SentenceTransformer(self.model_name, local_files_only=True)
-            return self._model
-        except Exception:
-            pass
-
-        try:
-            # Fallback to online if offline cache is missing
+        # If sentence-transformers is not available, fall back to hash model
+        if SentenceTransformer is None:
             print(
-                f"Loading model {self.model_name} from cache failed, "
-                "trying to load with network access...",
-            )
-            self._model = SentenceTransformer(self.model_name, local_files_only=False)
-            return self._model
-        except Exception as exc:
-            # Final fallback: deterministic local embedding model
-            print(
-                "Falling back to hash-based embedding model "
-                f"due to error loading SentenceTransformer: {exc}",
+                "sentence-transformers is not installed; "
+                "falling back to hash-based embedding model.",
             )
             self._model = _HashEmbeddingModel()
             return self._model
+
+        # Try real model (offline first)
+        if SentenceTransformer is not None:
+            try:
+                self._model = SentenceTransformer(self.model_name, local_files_only=True)
+                return self._model
+            except Exception:
+                pass
+
+            try:
+                # Fallback to online if offline cache is missing
+                print(
+                    f"Loading model {self.model_name} from cache failed, "
+                    "trying to load with network access...",
+                )
+                self._model = SentenceTransformer(self.model_name, local_files_only=False)
+                return self._model
+            except Exception as exc:
+                # Final fallback: deterministic local embedding model
+                print(
+                    "Falling back to hash-based embedding model "
+                    f"due to error loading SentenceTransformer: {exc}",
+                )
+
+        # If we reach here, we either don't have SentenceTransformer
+        # or all attempts to load it have failed.
+        self._model = _HashEmbeddingModel()
+        return self._model
     
     def encode(self, text: str) -> np.ndarray:
         """
