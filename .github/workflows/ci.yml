@@ -41,7 +41,9 @@ jobs:
         run: |
           python scripts/test_embeddings_mock.py
 
-      - name: Run RAG and ingest tests
+      - name: Run RAG and ingest tests (mock embeddings)
+        env:
+          RELATION_RADAR_EMBEDDINGS_MODE: mock
         run: |
           python scripts/test_rag.py
           python scripts/test_ingest.py
