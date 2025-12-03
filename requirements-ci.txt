@@ -1,0 +1,13 @@
+## Lean requirements for CI (no heavy model deps)
+pydantic>=2.7
+langchain-core>=0.3.0
+langchain-community>=0.3.0
+chromadb>=0.5.0
+
+## API / web (used from v0.2+)
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+## HTTP client for local LLM (Qwen via Ollama)
+requests>=2.32.0
+
