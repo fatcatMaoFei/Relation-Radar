@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from backend.core.models import Event, Person  # noqa: E402
 from backend.core.repositories import EventRepository, PersonRepository  # noqa: E402
+from backend.rag.chains import ask_question  # noqa: E402
 
 
 def add_person(args) -> None:
@@ -138,6 +139,30 @@ def list_persons(args) -> None:
         print("-" * 40)
 
 
+def ask(args) -> None:
+    """Ask a question using the RAG QA chain."""
+    question = args.question.strip()
+    if not question:
+        print("Error: question cannot be empty")
+        return
+
+    person_id = args.person_id
+    verbose = bool(args.verbose)
+
+    try:
+        answer = ask_question(
+            question=question,
+            person_id=person_id,
+            top_k=args.top_k,
+            verbose=verbose,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"Error while running QA chain: {exc}")
+        return
+
+    print(answer)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="relation-radar",
@@ -180,6 +205,33 @@ def main() -> None:
     # list-persons command (bonus)
     persons_parser = subparsers.add_parser("list-persons", help="List all persons")
     persons_parser.set_defaults(func=list_persons)
+
+    # ask command
+    ask_parser = subparsers.add_parser(
+        "ask",
+        help="Ask a question based on recorded events",
+    )
+    ask_parser.add_argument(
+        "question",
+        help="Question to ask (in natural language)",
+    )
+    ask_parser.add_argument(
+        "--person-id",
+        type=int,
+        help="Optional person ID to focus the question on a specific person",
+    )
+    ask_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=5,
+        help="Number of context records to retrieve (default: 5)",
+    )
+    ask_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed context and formatted answer",
+    )
+    ask_parser.set_defaults(func=ask)
     
     args = parser.parse_args()
     

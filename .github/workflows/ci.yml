@@ -37,7 +37,15 @@ jobs:
           python scripts/init_db.py
           python scripts/import_sample_data.py
 
+      - name: Run mock embedding tests
+        run: |
+          python scripts/test_embeddings_mock.py
+
+      - name: Run RAG and ingest tests
+        run: |
+          python scripts/test_rag.py
+          python scripts/test_ingest.py
+
       - name: Lint with ruff
         run: |
           ruff check backend frontend mcp_server scripts
-
