@@ -39,3 +39,22 @@ class Relationship(BaseModel):
     relation_type: Optional[str] = None
     description: Optional[str] = None
 
+
+class Feedback(BaseModel):
+    """
+    User feedback on a single QA answer.
+
+    rating 建议使用固定取值：
+    - "accurate"   表示回答准确、有帮助；
+    - "inaccurate" 表示回答不准或误导；
+    - "risky"      表示回答有潜在风险（隐私 / 伦理等）。
+    """
+
+    id: Optional[int] = None
+    person_id: Optional[int] = None
+    question: str
+    answer: str
+    used_context_event_ids: List[int] = Field(default_factory=list)
+    rating: str
+    created_at: Optional[str] = None
+

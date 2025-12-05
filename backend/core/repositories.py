@@ -4,7 +4,7 @@ import json
 from typing import Iterable, List, Optional
 
 from .db import get_connection
-from .models import Event, Person, Relationship
+from .models import Event, Feedback, Person, Relationship
 
 
 def _encode_list(values: Iterable[str]) -> str:
@@ -18,6 +18,22 @@ def _decode_list(raw: Optional[str]) -> List[str]:
         data = json.loads(raw)
         if isinstance(data, list):
             return [str(item) for item in data]
+    except Exception:
+        pass
+    return []
+
+
+def _encode_int_list(values: Iterable[int]) -> str:
+    return json.dumps([int(v) for v in values], ensure_ascii=False)
+
+
+def _decode_int_list(raw: Optional[str]) -> List[int]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return [int(item) for item in data]
     except Exception:
         pass
     return []
@@ -385,3 +401,78 @@ class RelationshipRepository:
             conn.commit()
         finally:
             conn.close()
+
+
+class FeedbackRepository:
+    """
+    Repository for user feedback records.
+    """
+
+    def create(self, feedback: Feedback) -> Feedback:
+        conn = get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO feedback (
+                    person_id,
+                    question,
+                    answer,
+                    used_context_ids,
+                    rating
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    feedback.person_id,
+                    feedback.question,
+                    feedback.answer,
+                    _encode_int_list(feedback.used_context_event_ids)
+                    if feedback.used_context_event_ids
+                    else None,
+                    feedback.rating,
+                ),
+            )
+            conn.commit()
+            feedback_id = int(cursor.lastrowid)
+            return feedback.copy(update={"id": feedback_id})
+        finally:
+            conn.close()
+
+    def list_recent(self, limit: int = 20) -> List[Feedback]:
+        conn = get_connection()
+        results: List[Feedback] = []
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id,
+                       person_id,
+                       question,
+                       answer,
+                       used_context_ids,
+                       rating,
+                       created_at
+                FROM feedback
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            for row in cursor.fetchall():
+                results.append(
+                    Feedback(
+                        id=row["id"],
+                        person_id=row["person_id"],
+                        question=row["question"],
+                        answer=row["answer"],
+                        used_context_event_ids=_decode_int_list(
+                            row["used_context_ids"],
+                        ),
+                        rating=row["rating"],
+                        created_at=row["created_at"],
+                    ),
+                )
+        finally:
+            conn.close()
+        return results

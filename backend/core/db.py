@@ -40,6 +40,7 @@ def init_db() -> None:
     - events
     - event_persons (many-to-many between events and persons)
     - relationships
+    - feedback (user ratings for QA answers)
     """
     conn = get_connection()
     try:
@@ -101,6 +102,20 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_event_persons_person ON event_persons(person_id);
             CREATE INDEX IF NOT EXISTS idx_relationships_person_a ON relationships(person_a_id);
             CREATE INDEX IF NOT EXISTS idx_relationships_person_b ON relationships(person_b_id);
+
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                person_id INTEGER,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                used_context_ids TEXT, -- JSON-encoded list of event IDs
+                rating TEXT NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE SET NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_feedback_person ON feedback(person_id);
+            CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON feedback(created_at);
             """
         )
 
