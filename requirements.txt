@@ -15,6 +15,7 @@ requests>=2.32.0
 ## API / web (used from v0.2+)
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
+streamlit>=1.38.0
 
 ## OCR (used by ingest_ocr, optional in CI)
 pillow>=10.0.0
