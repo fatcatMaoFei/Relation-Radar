@@ -10,10 +10,15 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from backend.core.db import init_db  # noqa: E402
 from backend.core.ingest import ingest_manual  # noqa: E402
-from backend.core.models import Event, Person  # noqa: E402
-from backend.core.repositories import EventRepository, PersonRepository  # noqa: E402
-from backend.rag.chains import get_qa_chain, ask_question as qa_ask_question  # noqa: E402
+from backend.core.models import Event, Feedback, Person  # noqa: E402
+from backend.core.repositories import (  # noqa: E402
+    EventRepository,
+    FeedbackRepository,
+    PersonRepository,
+)
+from backend.rag.chains import get_qa_chain  # noqa: E402
 
 
 def add_person(args) -> None:
@@ -234,7 +239,7 @@ def list_persons(args) -> None:
 
 
 def ask(args) -> None:
-    """Ask a question using the RAG QA chain."""
+    """Ask a question using the RAG QA chain, with optional feedback."""
     question = args.question.strip()
     if not question:
         print("Error: question cannot be empty")
@@ -243,18 +248,29 @@ def ask(args) -> None:
     person_id = args.person_id
     verbose = bool(args.verbose)
 
+    qa_chain = get_qa_chain()
+
     try:
-        answer = qa_ask_question(
+        result = qa_chain.ask(
             question=question,
             person_id=person_id,
             top_k=args.top_k,
-            verbose=verbose,
         )
     except Exception as exc:  # noqa: BLE001
         print(f"Error while running QA chain: {exc}")
         return
 
-    print(answer)
+    # Print answer (or full response)
+    if verbose:
+        print(result.format_full_response())
+    else:
+        print(result.answer)
+
+    # Prompt for feedback (best‑effort, never raises)
+    try:
+        _maybe_collect_feedback(result=result, person_id=person_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] Failed to record feedback: {exc}")
 
 
 def main() -> None:
@@ -335,16 +351,57 @@ def main() -> None:
     ingest_parser.set_defaults(func=ingest_text)
     
     args = parser.parse_args()
-    
+
+    # Ensure database schema (including new tables such as feedback) exists
+    init_db()
+
     if not hasattr(args, "func"):
         parser.print_help()
         return
-    
+
     try:
         args.func(args)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Error: {e}")
         sys.exit(1)
+
+
+def _maybe_collect_feedback(result, person_id: int | None) -> None:
+    """
+    Optionally collect user feedback for a QA answer via CLI.
+
+    This is intentionally simple and text‑based so it works well
+    in terminals and doesn't interfere with non‑interactive usage.
+    """
+    print("\n" + "-" * 60)
+    print("Rate this answer?")
+    print("  1 = accurate / helpful")
+    print("  2 = inaccurate / not helpful")
+    print("  3 = risky / problematic")
+    choice = input("Your rating (1/2/3, Enter to skip): ").strip()
+
+    mapping = {
+        "1": "accurate",
+        "2": "inaccurate",
+        "3": "risky",
+    }
+    rating = mapping.get(choice)
+    if not rating:
+        print("Feedback skipped.")
+        return
+
+    used_ids = [doc.event_id for doc in result.retrieved_contexts]
+
+    repo = FeedbackRepository()
+    feedback = Feedback(
+        person_id=person_id,
+        question=result.question,
+        answer=result.answer,
+        used_context_event_ids=used_ids,
+        rating=rating,
+    )
+    saved = repo.create(feedback)
+    print(f"Feedback saved with id={saved.id}.")
 
 
 if __name__ == "__main__":

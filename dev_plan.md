@@ -196,16 +196,38 @@
   - `ruff check backend frontend mcp_server scripts` 通过；
   - 运行 `python scripts/run_reminders.py` 时能正常输出结果（当前示例数据可能没有提醒，至少不会报错）。
 
-### PR-0.2-09：反馈机制：记录用户对回答的评价（待开发）
+### PR-0.2-09：反馈机制：记录用户对回答的评价（已完成）
 - 目标：为端到端训练闭环打基础，记录“这次回答好不好”的反馈。
 - 范围：
   - 新增 Feedback 表：
     - question / answer / used_context_ids / rating（准确 / 不准 / 有风险） / created_at；
   - `backend/core/models.py` / `db.py` / `repositories.py`：对应模型与 CRUD；
-  - CLI / Web UI：提供对上一条回答打分的入口。
+  - CLI：在 `ask` 命令中回答结束后，提示用户对本次回答进行 1/2/3 级别评价（可跳过）。
 - 自检：
-  - 完成一次问答后可以进行评分，数据正确写入 Feedback 表；
-  - （可选）`scripts/test_feedback_flow.py` 覆盖“问 → 答 → 评 → 查”的完整路径。
+  - `python -m compileall backend frontend mcp_server scripts`、`ruff check backend frontend mcp_server scripts` 通过；
+  - 运行 `python scripts/test_feedback_flow.py` 能创建一条示例反馈并在 `list_recent` 中读出；
+  - 从 CLI 调用 `python -m frontend.cli.main ask "测试问题" --person-id 1` 后，可以根据提示输入评分并成功写入反馈表。
+
+### PR-0.2-10：Web 端问答 + 文本录入（最小版）（待开发）
+- 目标：
+  - 在 Web UI 中完成「选择朋友 → 直接提问 → 获取 LLM 回答」的闭环；
+  - 支持从 Web 端为某个朋友追加一条纯文本事件记录，便于日常使用时顺手更新。
+- 范围：
+  - 后端（统一 API）：
+    - `backend/api/service.py`：
+      - 新增 `POST /persons/{id}/ask`：调用现有 RAG + LLM 链（`backend.rag.chains`），支持 `top_k` 参数；
+      - 新增 `POST /persons/{id}/events`：接收一段原始文本，调用 `ingest_manual` / `extract_events` 为该朋友创建事件；
+    - 如有需要，可增加简单的 Pydantic 请求 / 响应模型，用于约束入参和返回结构。
+  - Web UI：
+    - `frontend/web/app.py`：
+      - 在时间线下方增加「提问」区域：问题输入框 + 触发按钮，显示本次回答及说明（基于你记录的信息，仅供参考）；
+      - 在侧边栏或时间线上方增加「新增事件」输入框（最小版先支持单段文本 + 当前选中朋友）；
+      - 透传现有的 `top_k` slider 配置到 `POST /persons/{id}/ask`，方便在界面里调节检索范围。
+- 自检：
+  - `python -m compileall backend frontend mcp_server scripts`、`ruff check backend frontend mcp_server scripts` 通过；
+  - 在本机启动 FastAPI + Streamlit 后，能完成：
+    - 选择一个朋友 → 填写问题 → 收到基于其历史记录的回答；
+    - 通过 Web 新增一条文本事件，并在刷新后出现在该朋友的时间线中。
 
 ---
 
