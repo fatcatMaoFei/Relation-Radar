@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from backend.core.ingest import ingest_manual  # noqa: E402
 from backend.core.models import Event, Person  # noqa: E402
 from backend.core.repositories import EventRepository, PersonRepository  # noqa: E402
-from backend.rag.chains import get_qa_chain  # noqa: E402
+from backend.rag.chains import get_qa_chain, ask_question as qa_ask_question  # noqa: E402
 
 
 def add_person(args) -> None:
@@ -244,7 +244,7 @@ def ask(args) -> None:
     verbose = bool(args.verbose)
 
     try:
-        answer = ask_question(
+        answer = qa_ask_question(
             question=question,
             person_id=person_id,
             top_k=args.top_k,

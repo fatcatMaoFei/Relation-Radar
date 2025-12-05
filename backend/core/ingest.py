@@ -563,3 +563,59 @@ def ingest_ocr(
         raise ValueError(f"OCR produced empty text for image: {image_file}")
 
     return ingest_manual(person_ids, text, auto_index=auto_index)
+
+
+def ingest_audio(
+    person_ids: List[int],
+    audio_path: str,
+    auto_index: bool = True,
+) -> Event:
+    """
+    Ingest an audio recording via speech-to-text and create an Event.
+
+    This function:
+    1. Uses a local speech-to-text model (e.g., Whisper) to transcribe audio
+    2. Reuses ingest_manual to extract event info and store it
+
+    The actual STT backend is optional and lazily imported to avoid heavy
+    dependencies by default. Recommended backend: openai/whisper.
+
+    Args:
+        person_ids: List of person IDs this event is associated with
+        audio_path: Path to the audio file
+        auto_index: Whether to automatically index in vector store
+
+    Returns:
+        The created Event object
+
+    Raises:
+        ValueError: If person_ids is empty or transcription is empty
+        RuntimeError: If STT dependencies are not installed
+    """
+    if not person_ids:
+        raise ValueError("At least one person_id is required")
+
+    audio_file = Path(audio_path)
+    if not audio_file.exists():
+        raise ValueError(f"Audio file not found: {audio_file}")
+
+    # Lazy import to keep base dependencies light
+    try:
+        import whisper  # type: ignore[import]
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise RuntimeError(
+            "Audio ingestion requires the 'whisper' package and its "
+            "dependencies (e.g., PyTorch, ffmpeg). "
+            "Install it via: pip install -U openai-whisper "
+            "and ensure ffmpeg is available on your system."
+        ) from exc
+
+    # Load model (can be configured via env in the future)
+    model = whisper.load_model("base")
+    result = model.transcribe(str(audio_file), language="zh")
+    text = (result.get("text") or "").strip()
+
+    if not text:
+        raise ValueError(f"Transcription produced empty text for audio: {audio_file}")
+
+    return ingest_manual(person_ids, text, auto_index=auto_index)
