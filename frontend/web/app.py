@@ -81,11 +81,18 @@ def create_event(person_id: int, text: str) -> Dict[str, Any]:
     return resp.json()
 
 
-def ask_question_api(person_id: int, question: str, top_k: int) -> Dict[str, Any]:
+def ask_question_api(
+    person_id: int,
+    question: str,
+    top_k: int,
+    related_person_ids: Optional[List[int]] = None,
+) -> Dict[str, Any]:
     """
     Ask a question about a person via the Web API.
     """
-    payload = {"question": question, "top_k": top_k}
+    payload: Dict[str, Any] = {"question": question, "top_k": top_k}
+    if related_person_ids:
+        payload["related_person_ids"] = related_person_ids
     resp = requests.post(
         f"{get_api_base()}/persons/{person_id}/ask",
         json=payload,
@@ -286,6 +293,19 @@ def main() -> None:
 
         # --- Q&A section ---
         st.subheader("Ask a question about this friend")
+        # Multi-friend selection for this question
+        other_persons = [p for p in persons if int(p.get("id")) != person_id]
+        other_options = {
+            f"{p.get('name', 'Unknown')} (#{p.get('id')})": int(p["id"])
+            for p in other_persons
+        }
+        selected_labels = st.multiselect(
+            "Also consider these friends (optional)",
+            options=list(other_options.keys()),
+            key="qa_related_persons",
+        )
+        related_ids = [other_options[label] for label in selected_labels]
+
         question = st.text_area(
             "Your question",
             value="",
@@ -301,6 +321,7 @@ def main() -> None:
                         person_id=person_id,
                         question=question,
                         top_k=int(st.session_state.get("rag_top_k", 10)),
+                        related_person_ids=related_ids or None,
                     )
                 except requests.RequestException as exc:
                     st.error(f"Failed to ask question: {exc}")

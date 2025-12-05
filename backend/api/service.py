@@ -43,6 +43,10 @@ class AskRequest(BaseModel):
         default=None,
         description="Number of context records to retrieve (optional, default from backend).",
     )
+    related_person_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Optional list of additional person IDs to include in retrieval.",
+    )
 
 
 class AskResponse(BaseModel):
@@ -137,7 +141,12 @@ def ask_person_question(person_id: int, payload: AskRequest) -> AskResponse:
     qa_chain = get_qa_chain()
     top_k = payload.top_k if payload.top_k is not None else 5
 
-    result = qa_chain.ask(question=question, person_id=person_id, top_k=top_k)
+    # If additional person IDs are provided, use multi-person retrieval.
+    if payload.related_person_ids:
+        person_ids = [person_id] + [int(pid) for pid in payload.related_person_ids]
+        result = qa_chain.ask_multi(question=question, person_ids=person_ids, top_k=top_k)
+    else:
+        result = qa_chain.ask(question=question, person_id=person_id, top_k=top_k)
     used_ids = [doc.event_id for doc in result.retrieved_contexts]
 
     return AskResponse(
