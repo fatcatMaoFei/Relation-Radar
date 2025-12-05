@@ -227,8 +227,6 @@ def main() -> None:
                         st.error(f"Failed to create event: {exc}")
                     else:
                         st.success(f"Saved event (id={created.get('id')}).")
-                        # Clear the input and refresh the page to show new data
-                        st.session_state["new_event_text"] = ""
                         st.experimental_rerun()
 
         # --- Timeline ---
