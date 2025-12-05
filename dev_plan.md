@@ -174,26 +174,27 @@
     - 调用 `GET /persons` 渲染朋友列表；
     - 调用 `GET /persons/{id}/events` 渲染时间线；
     - 支持按时间范围和标签过滤；
-    - 提供“Max events” 控件控制一次展示的事件条数；
+    - 提供 “Max events” 控件控制一次展示的事件条数；
     - 提供 `top_k` slider，占位同步 RAG 检索范围（值记录在 `st.session_state` 中，后续问答视图复用）。
   - 该 UI 只通过 Web API 获取数据，不直接访问数据库或向量库。
 - 自检：
   - `python -m compileall backend frontend mcp_server scripts` 通过；
   - `ruff check backend frontend mcp_server scripts` 通过；
-  - 启动 FastAPI（`python -m backend.api.service` / `uvicorn`）+ `streamlit run frontend/web/app.py` 后，
-    能在浏览器中选择朋友、按时间 / 标签过滤事件列表。
+  - 启动 FastAPI（`python backend/api/service.py` 或 `uvicorn backend.api.service:app`）和
+    `streamlit run frontend/web/app.py` 后，能在浏览器中选择朋友、按时间 / 标签过滤事件列表。
 
-### PR-0.2-08：提醒机制（生日 / 长时间未联系 / 情绪波动）（待开发）
-- 目标：实现基础提醒逻辑，先以 CLI / 日志方式输出，后续再进 UI。
+### PR-0.2-08：提醒机制（生日 / 长时间未联系 / 情绪波动）（已完成）
+- 目标：实现基础提醒逻辑，先以 CLI / 日志方式输出，后续再接入 UI。
 - 范围：
   - `backend/core/reminders.py`：
-    - 扫描近期生日 / 纪念日；
-    - 长时间未联系的朋友；
-    - 连续负向情绪的事件片段。
-  - `scripts/run_reminders.py`：运行扫描并打印提醒建议。
+    - 扫描近期生日（默认 14 天内）；
+    - 扫描长时间未记录互动的朋友（默认 90 天未有新事件）；
+    - 扫描最近 30 天内连续出现负向情绪事件的朋友（基于若干关键词判断）。
+  - `scripts/run_reminders.py`：运行扫描并在终端打印提醒建议。
 - 自检：
-  - 借助示例数据能看到合理的提醒输出；
-  - 不会阻塞正常录入和问答流程。
+  - `python -m compileall backend frontend mcp_server scripts` 通过；
+  - `ruff check backend frontend mcp_server scripts` 通过；
+  - 运行 `python scripts/run_reminders.py` 时能正常输出结果（当前示例数据可能没有提醒，至少不会报错）。
 
 ### PR-0.2-09：反馈机制：记录用户对回答的评价（待开发）
 - 目标：为端到端训练闭环打基础，记录“这次回答好不好”的反馈。
@@ -219,7 +220,7 @@
   - 所有发送到远端的数据都做脱敏与裁剪，只保留必要事实。
 - 端到端训练闭环：
   - 从问答 + Feedback + 使用的上下文，构造训练样本；
-  - 远端大模型给出“理想答案”，形成 `(question, facts, ideal_answer)` 三元组；
+  - 远端大模型给出 “理想答案”，形成 `(question, facts, ideal_answer)` 三元组；
   - 定期用 LoRA / QLoRA 微调本地小模型，让其逐步接近用户自己的使用风格。
 - 移动端（iOS / Android）探索：
   - 直接复用当前 Web API，先做简单原型（例如 Flutter / React Native）；
