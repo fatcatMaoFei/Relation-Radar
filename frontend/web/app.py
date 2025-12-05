@@ -67,6 +67,34 @@ def fetch_events(
     return resp.json()
 
 
+def create_event(person_id: int, text: str) -> Dict[str, Any]:
+    """
+    Create a new text event for a person via the Web API.
+    """
+    payload = {"text": text}
+    resp = requests.post(
+        f"{get_api_base()}/persons/{person_id}/events",
+        json=payload,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def ask_question_api(person_id: int, question: str, top_k: int) -> Dict[str, Any]:
+    """
+    Ask a question about a person via the Web API.
+    """
+    payload = {"question": question, "top_k": top_k}
+    resp = requests.post(
+        f"{get_api_base()}/persons/{person_id}/ask",
+        json=payload,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def render_sidebar(persons: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
     Render the sidebar with person selection and basic info.
@@ -179,9 +207,34 @@ def main() -> None:
             f"(ID {selected_person.get('id')})"
         )
 
+        person_id = int(selected_person["id"])
+
+        # --- New event input ---
+        with st.expander("Add a new note for this friend", expanded=False):
+            new_text = st.text_area(
+                "New note (plain text)",
+                value="",
+                height=80,
+                key="new_event_text",
+            )
+            if st.button("Save note", key="save_new_event"):
+                if not new_text.strip():
+                    st.warning("Text cannot be empty.")
+                else:
+                    try:
+                        created = create_event(person_id=person_id, text=new_text)
+                    except requests.RequestException as exc:
+                        st.error(f"Failed to create event: {exc}")
+                    else:
+                        st.success(f"Saved event (id={created.get('id')}).")
+                        # Clear the input and refresh the page to show new data
+                        st.session_state["new_event_text"] = ""
+                        st.experimental_rerun()
+
+        # --- Timeline ---
         try:
             events = fetch_events(
-                person_id=int(selected_person["id"]),
+                person_id=person_id,
                 start=start_date,
                 end=end_date,
                 tag=event_tag or None,
@@ -193,41 +246,72 @@ def main() -> None:
 
         if not events:
             st.info("No events found for this friend with current filters.")
-            return
+        else:
+            for event in events:
+                occurred_at = event.get("occurred_at") or "Unknown time"
+                tags = event.get("tags") or []
+                header = f"**{occurred_at}**"
+                if tags:
+                    header += " · " + ", ".join(tags)
+                st.markdown(header)
 
-        for event in events:
-            occurred_at = event.get("occurred_at") or "Unknown time"
-            tags = event.get("tags") or []
-            header = f"**{occurred_at}**"
-            if tags:
-                header += " · " + ", ".join(tags)
-            st.markdown(header)
+                summary = event.get("summary")
+                if summary:
+                    st.write(summary)
 
-            summary = event.get("summary")
-            if summary:
-                st.write(summary)
+                raw_text = event.get("raw_text")
+                if raw_text and raw_text != summary:
+                    with st.expander("Raw note", expanded=False):
+                        st.write(raw_text)
 
-            raw_text = event.get("raw_text")
-            if raw_text and raw_text != summary:
-                with st.expander("Raw note", expanded=False):
-                    st.write(raw_text)
+                emotion = event.get("emotion")
+                preferences = event.get("preferences") or []
+                taboos = event.get("taboos") or []
 
-            emotion = event.get("emotion")
-            preferences = event.get("preferences") or []
-            taboos = event.get("taboos") or []
+                meta_parts = []
+                if emotion:
+                    meta_parts.append(f"Emotion: {emotion}")
+                if preferences:
+                    meta_parts.append("Likes: " + "; ".join(preferences))
+                if taboos:
+                    meta_parts.append("Avoid: " + "; ".join(taboos))
 
-            meta_parts = []
-            if emotion:
-                meta_parts.append(f"Emotion: {emotion}")
-            if preferences:
-                meta_parts.append("Likes: " + "; ".join(preferences))
-            if taboos:
-                meta_parts.append("Avoid: " + "; ".join(taboos))
+                if meta_parts:
+                    st.caption(" · ".join(meta_parts))
 
-            if meta_parts:
-                st.caption(" · ".join(meta_parts))
+                st.markdown("---")
 
-            st.markdown("---")
+        # --- Q&A section ---
+        st.subheader("Ask a question about this friend")
+        question = st.text_area(
+            "Your question",
+            value="",
+            height=80,
+            key="qa_question",
+        )
+        if st.button("Ask", key="qa_ask_button"):
+            if not question.strip():
+                st.warning("Question cannot be empty.")
+            else:
+                try:
+                    payload = ask_question_api(
+                        person_id=person_id,
+                        question=question,
+                        top_k=int(st.session_state.get("rag_top_k", 10)),
+                    )
+                except requests.RequestException as exc:
+                    st.error(f"Failed to ask question: {exc}")
+                else:
+                    st.session_state["qa_last_answer"] = payload
+
+        last_answer = st.session_state.get("qa_last_answer")
+        if last_answer:
+            st.markdown("**Answer (for this friend):**")
+            st.write(last_answer.get("answer", ""))
+            st.caption(
+                "Based on your recorded notes for this friend. "
+                "Please double‑check before acting on suggestions.",
+            )
 
 
 if __name__ == "__main__":
