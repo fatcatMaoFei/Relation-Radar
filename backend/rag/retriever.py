@@ -81,11 +81,17 @@ class EventRetriever:
             start_date: Filter by start date (ISO format)
             end_date: Filter by end date (ISO format)
             tags: Filter by event tags
-            top_k: Number of top results to return
+            top_k: Number of top results to return (will be clamped to [1, 50])
             
         Returns:
             List of retrieved documents with scores
         """
+        # Clamp top_k to a reasonable range
+        if top_k <= 0:
+            top_k = 5
+        elif top_k > 50:
+            top_k = 50
+
         # Step 1: Get all events matching the filters from database
         candidate_events = self._get_candidate_events(
             person_id=person_id,
