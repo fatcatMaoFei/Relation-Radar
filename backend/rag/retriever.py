@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterable, List, Optional, Set
 
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -183,6 +183,74 @@ class EventRetriever:
             List of retrieved documents
         """
         return self.retrieve(query=query, person_id=person_id, top_k=top_k)
+
+    def retrieve_for_persons(
+        self,
+        query: str,
+        person_ids: Iterable[int],
+        top_k: int = 5,
+    ) -> List[RetrievedDocument]:
+        """
+        Retrieve events for multiple persons at once.
+
+        当前实现策略：
+        - 在向量空间里全局检索 top_k * 5 条候选；
+        - 仅保留 person_ids 有交集的事件；
+        - 按相似度排序后返回前 top_k 条。
+        """
+        person_id_set: Set[int] = {int(pid) for pid in person_ids}
+        if not person_id_set:
+            return []
+
+        # Clamp top_k
+        if top_k <= 0:
+            top_k = 5
+        elif top_k > 50:
+            top_k = 50
+
+        query_vector = self.embedding_client.encode(query)
+
+        ids, distances, metadatas = self.vector_store.search(
+            query_vector=query_vector,
+            top_k=top_k * 5,
+            where=None,
+        )
+
+        retrieved_docs: List[RetrievedDocument] = []
+
+        for doc_id, distance, metadata in zip(ids, distances, metadatas):
+            try:
+                event_id = int(doc_id.split("_")[-1]) if "_" in doc_id else int(doc_id)
+            except (ValueError, IndexError):
+                continue
+
+            event = self.event_repo.get(event_id)
+            if not event:
+                continue
+
+            if not any(pid in person_id_set for pid in event.person_ids):
+                continue
+
+            similarity_score = 1.0 - min(distance, 1.0)
+            content = self._build_event_content(event)
+
+            retrieved_docs.append(
+                RetrievedDocument(
+                    event_id=event_id,
+                    content=content,
+                    score=similarity_score,
+                    person_ids=event.person_ids,
+                    event_type=event.event_type,
+                    occurred_at=event.occurred_at or event.raw_time_text,
+                    emotion=event.emotion,
+                ),
+            )
+
+            if len(retrieved_docs) >= top_k:
+                break
+
+        retrieved_docs.sort(key=lambda x: x.score, reverse=True)
+        return retrieved_docs[:top_k]
     
     def _get_candidate_events(
         self,

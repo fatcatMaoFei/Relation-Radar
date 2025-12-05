@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterable, List, Optional
 
 # Ensure project root is on sys.path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -118,6 +118,38 @@ class QAChain:
             answer=answer,
             retrieved_contexts=retrieved_docs,
             person_id=person_id
+        )
+
+    def ask_multi(
+        self,
+        question: str,
+        person_ids: Iterable[int],
+        top_k: int = 5,
+    ) -> QAResult:
+        """
+        Ask a question about multiple persons at once.
+
+        用于“猫和阿B谁更适合…”这类问题，会同时检索多人的事件。
+        """
+        ids = [int(pid) for pid in person_ids]
+        if not ids:
+            return self.ask(question=question, person_id=None, top_k=top_k)
+
+        retrieved_docs = self.retriever.retrieve_for_persons(
+            query=question,
+            person_ids=ids,
+            top_k=top_k,
+        )
+
+        context = self._build_context(retrieved_docs)
+        prompt = self._build_prompt(question, context)
+        answer = self.llm_client.generate(prompt)
+
+        return QAResult(
+            question=question,
+            answer=answer,
+            retrieved_contexts=retrieved_docs,
+            person_id=ids[0],
         )
     
     def chat(
