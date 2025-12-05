@@ -1,7 +1,7 @@
 # Relation Radar 开发计划（按小步 PR 拆分）
 
 版本：v0.2（对齐当前代码库）  
-目标：把 `prd.md` 里的愿景拆成一组“小而稳”的 PR，保持：
+目标：把 `prd.md` 里的愿景拆成一组“小而稳”的 PR，保证：
 - 每个 PR 只做一件清晰的事，方便 review / 回滚；
 - 每次改动都有最少一套可以本地跑通的自检脚本；
 - 计划随代码演进持续更新。
@@ -123,9 +123,6 @@
   - `frontend/web/app.py`：  
     - 在“Ask a question about this friend” 区域增加 “Also consider these friends (optional)” 多选框（当前好友除外）；  
     - 调用 `ask_question_api` 时把所选好友 ID 通过 `related_person_ids` 传给后端。  
-- 自检：  
-  - `python -m compileall backend frontend mcp_server scripts`、`ruff check backend frontend mcp_server scripts` 通过；  
-  - 在 Web 中选择“猫”作为当前好友，在 “Also consider these friends” 里勾选“阿B”，对“谁更喜欢吃什么”这类问题，回答会明显参考两人的历史记录，而不仅是当前好友。  
 
 ---
 
@@ -135,20 +132,21 @@
 以下 PR 编号暂定，进入 v0.3 前可以再微调。
 
 ### PR-0.3-01：MCP Server 基础实现（已完成）
-- `mcp_server/server.py`：工具注册与本地 CLI 包装（search_events / get_person_summary / log_feedback）；
+- `mcp_server/server.py`：工具注册与本地 CLI 包装（search_events / get_person_summary / log_feedback）；  
 - `mcp_server/tools/*.py`：  
   - `search_events_tool`：安全地检索事件摘要；  
   - `get_person_summary_tool`：构造人物画像的结构化信息；  
   - `log_feedback_tool`：写入 Feedback 表记录远端 teacher 的评价。  
 
-### PR-0.3-02：Teacher 模式 & 训练数据流水线（待规划）
+### PR-0.3-02：Teacher 模式 & 训练数据流水线（已完成）
 - 目标：让远端大模型在脱敏数据上生成“理想答案”，形成本地微调数据集。  
 - 范围：  
-  - 设计一套工具调用 prompt（只能通过 MCP 工具看数据、必须引用事实、要加风险提示）；  
+  - `backend/llm/remote_client.py`：远端 teacher 客户端，从环境变量读取 provider / model / API Key；  
   - `scripts/build_teacher_dataset.py`：  
-    - 输入：若干问题 + MCP 工具返回的事实；  
-    - 输出：`(question, facts, ideal_answer)` JSONL，用于训练；  
-  - 与 Feedback 表打通：优先选用户标为“accurate”的样本进入数据集。  
+    - 输入：JSONL，包含 `question` + `person_ids` (+ 可选 top_k / id)；  
+    - 调用 MCP 工具构造 facts（人物画像 + RAG 搜索结果）；  
+    - 调远端 teacher 模型生成 `ideal_answer`，输出 `(question, facts, ideal_answer)` JSONL；  
+  - 与 Feedback 表打通：后续可优先选择用户标为 “accurate” 的样本进入训练集。  
 
 ### PR-0.3-03：提示词体系整理 & A/B 测试（待规划）
 - 目标：系统整理并验证提示词（prompt）设计，包括本地 Qwen 与远端 teacher 两侧。  
@@ -167,7 +165,7 @@
 - 范围：  
   - `scripts/train_lora_qwen.py`：  
     - 使用 Transformers + peft，在你已有的 Qwen2.5-3B 基础上做参数高效微调；  
-    - 支持从 JSONL 数据集中加载 `(question, facts, answer)`，按 batch 训练。  
+    - 支持从 JSONL 数据集中加载 `(question, facts, ideal_answer)`，按 batch 训练。  
   - `scripts/compare_llm_before_after.py`：  
     - 对同一组固定问题，分别调用“原始本地模型”和“微调后的模型”；  
     - 把两边回答并排打印，方便人工对比（准确度 / 风格 / 安全性）。  
@@ -175,6 +173,34 @@
   - 更好地记住“一个人多条记录”里的偏好与忌讳，减少答非所问；  
   - 更稳定地复用时间、场景信息（例如“冬天”“生日”“上次吵架”）；  
   - 在用户标为“risky”的场景中学会收敛：多给提醒、少给激进建议。
+
+---
+
+## 远期：分层计费与 SaaS 形态（草案）
+
+目标：在保证“本地优先、隐私可控”的前提下，提供三层可升级的使用模式，便于未来做订阅收费。
+
+- 免费层（本地模式）  
+  - 只开放本地 LLM（Qwen 小模型）能力 + 现有 UI / 提示词；  
+  - 默认不自动访问任何远端 API；  
+  - MCP 仅作为“高级玩家”连接 ChatGPT / 其它客户端的选项，本应用本身不主动拉起远端模型。
+
+- 自带 Key 层（BYO key）  
+  - 用户在设置页面填写自己的 OpenAI / Gemini 等 API Key；  
+  - `backend.llm.remote_client` 使用该 Key 进行：  
+    - teacher 模式（离线生成训练数据）；  
+    - 可选的高阶推理（例如多朋友复杂平衡场景）；  
+  - 计费压力完全在用户自己的账号上，本应用只负责 orchestrator 和数据脱敏。
+
+- 付费 SaaS 层（Relation Radar LLM Proxy）  
+  - 由我们在云端维护“Relation Radar LLM Proxy”服务：  
+    - 内部对接 GPT‑4.x / 更大 Qwen / Gemini 等多种强模型，并做统一路由；  
+    - 对本地 App 暴露统一接口（例如 `https://api.relationradar.ai/llm`）；  
+  - 用户本地只需登录并打开“使用云端增强”开关，不再需要手动填写各家 API Key；  
+  - 订阅费用用于覆盖该 Proxy 的调用成本；  
+  - 与 MCP 工具结合：云端服务作为 MCP 客户端，通过 `mcp_server` 访问用户本地数据，只拿到脱敏后的事实摘要，而不直接读取原始数据库。
+
+该分层设计不会在 v0.3 直接落地，但会对后续：远端 client 配置、MCP server 接口以及安全策略提供长期约束和方向。
 
 ---
 
