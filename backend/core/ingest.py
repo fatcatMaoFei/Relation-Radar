@@ -513,3 +513,53 @@ def ingest_batch(
             print(f"Warning: Skipping text due to error: {e}")
     
     return events
+
+
+def ingest_ocr(
+    person_ids: List[int],
+    image_path: str,
+    auto_index: bool = True,
+) -> Event:
+    """
+    Ingest an image (e.g., chat screenshot) via OCR and create an Event.
+
+    This function:
+    1. Runs OCR on the image to obtain text
+    2. Reuses ingest_manual to extract event info and store it
+
+    Args:
+        person_ids: List of person IDs this event is associated with
+        image_path: Path to the image file
+        auto_index: Whether to automatically index in vector store
+
+    Returns:
+        The created Event object
+
+    Raises:
+        ValueError: If person_ids is empty or OCR result is empty
+        RuntimeError: If OCR dependencies are not installed
+    """
+    if not person_ids:
+        raise ValueError("At least one person_id is required")
+
+    image_file = Path(image_path)
+    if not image_file.exists():
+        raise ValueError(f"Image file not found: {image_file}")
+
+    try:
+        from PIL import Image  # type: ignore[import]
+        import pytesseract  # type: ignore[import]
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise RuntimeError(
+            "OCR dependencies not installed. "
+            "Please install pillow and pytesseract, and ensure Tesseract OCR "
+            "is available on your system."
+        ) from exc
+
+    image = Image.open(str(image_file))
+    text = pytesseract.image_to_string(image)
+
+    if not text or not text.strip():
+        raise ValueError(f"OCR produced empty text for image: {image_file}")
+
+    return ingest_manual(person_ids, text, auto_index=auto_index)

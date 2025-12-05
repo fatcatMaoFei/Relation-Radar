@@ -32,6 +32,13 @@ Relation Radar 是一个本地优先的 AI 关系助手，把每个朋友当作�
 - 启动 Web（实现后）：
   - `python -m frontend.web.app` 或按文档说明。
 
+#### OCR 相关（可选）
+
+- OCR 依赖：`pillow` + `pytesseract`，并需要在系统中安装 Tesseract OCR：
+  - Windows/macOS/Linux 可参考官方说明：<https://tesseract-ocr.github.io/tessdoc/Installation.html>
+- 开发环境中可使用脚本测试 OCR 摄入：
+  - `python scripts/test_ingest_ocr.py --person-id 1 path/to/screenshot.png`
+
 ### 3. 开发流程建议
 
 - 从 `main` 切出分支（参照 `dev_plan.md` 中的 PR 编号）：
