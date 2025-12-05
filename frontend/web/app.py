@@ -227,7 +227,12 @@ def main() -> None:
                         st.error(f"Failed to create event: {exc}")
                     else:
                         st.success(f"Saved event (id={created.get('id')}).")
-                        st.experimental_rerun()
+                        try:
+                            # Streamlit >= 1.30
+                            st.rerun()
+                        except AttributeError:
+                            # Older versions used experimental_rerun
+                            getattr(st, "experimental_rerun")()
 
         # --- Timeline ---
         try:
